@@ -5,6 +5,7 @@ FROM ${BUILD_FROM}
 # that occur on Alpine (e.g. clipboard, node-llama-cpp).
 
 # Install base packages (without nodejs/npm - we'll get Node 22 from NodeSource)
+# Includes build-essential and vim as recommended by Homebrew
 RUN apt-get update && apt-get install -y --no-install-recommends \
     bash \
     git \
@@ -19,6 +20,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 \
     nginx \
     gnupg \
+    build-essential \
+    vim \
+    procps \
+    sudo \
  && apt-get clean \
  && rm -rf /var/lib/apt/lists/*
 
