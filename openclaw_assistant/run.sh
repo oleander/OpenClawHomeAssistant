@@ -41,31 +41,47 @@ set +x
 export HOME=/config
 mkdir -p /config/.openclaw /config/clawd /config/keys /config/secrets
 
-# Move Homebrew from Docker image to /config for persistence (first boot only)
-if [ ! -L /home/linuxbrew/.linuxbrew ] && [ -d /home/linuxbrew/.linuxbrew ]; then
-  echo "INFO: Moving Homebrew from image to /config/.linuxbrew for persistence..."
-  mv /home/linuxbrew/.linuxbrew /config/.linuxbrew
-  ln -s /config/.linuxbrew /home/linuxbrew/.linuxbrew
-  echo "INFO: Homebrew moved to /config/.linuxbrew"
-elif [ ! -d /home/linuxbrew/.linuxbrew ] && [ ! -L /home/linuxbrew/.linuxbrew ]; then
-  # Homebrew not in image and not yet persisted - create symlink for future
-  if [ -d /config/.linuxbrew ]; then
-    mkdir -p /home/linuxbrew
-    ln -s /config/.linuxbrew /home/linuxbrew/.linuxbrew
-    echo "INFO: Linked /home/linuxbrew/.linuxbrew to existing /config/.linuxbrew"
+# Install Homebrew to /config/.linuxbrew for persistence (first boot only)
+# This ensures all brew packages persist across container restarts
+if [ ! -d /config/.linuxbrew ] || [ ! -f /config/.linuxbrew/bin/brew ]; then
+  echo "INFO: Installing Homebrew to /config/.linuxbrew (first boot, this may take 5-10 minutes)..."
+  mkdir -p /config/.linuxbrew
+  cd /config/.linuxbrew
+  
+  # Install Homebrew directly to /config/.linuxbrew
+  export HOMEBREW_PREFIX="/config/.linuxbrew"
+  export HOMEBREW_REPOSITORY="/config/.linuxbrew/Homebrew"
+  
+  # Download and run Homebrew installer
+  NONINTERACTIVE=1 CI=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" || {
+    echo "ERROR: Failed to install Homebrew"
+    echo "INFO: Homebrew will not be available, but the add-on will continue"
+  }
+  
+  # Install gcc if Homebrew was installed successfully
+  if [ -f /config/.linuxbrew/bin/brew ]; then
+    echo "INFO: Installing gcc via Homebrew..."
+    /config/.linuxbrew/bin/brew install gcc || echo "WARN: Failed to install gcc via Homebrew"
+    echo "INFO: Homebrew installation complete"
   fi
+else
+  echo "INFO: Homebrew already installed in /config/.linuxbrew"
 fi
 
 # Initialize Homebrew environment in /config/.bashrc for agent and user sessions
 if [ ! -f /config/.bashrc ] || ! grep -q "brew shellenv" /config/.bashrc; then
   echo "" >> /config/.bashrc
-  echo 'eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"' >> /config/.bashrc
+  echo '# Initialize Homebrew environment' >> /config/.bashrc
+  echo 'if [ -f /config/.linuxbrew/bin/brew ]; then' >> /config/.bashrc
+  echo '  eval "$(/config/.linuxbrew/bin/brew shellenv)"' >> /config/.bashrc
+  echo 'fi' >> /config/.bashrc
   echo "INFO: Added brew shellenv to /config/.bashrc"
 fi
 
 # Set up brew environment for this script
-if [ -d /home/linuxbrew/.linuxbrew/bin ]; then
-  eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
+if [ -d /config/.linuxbrew/bin ]; then
+  eval "$(/config/.linuxbrew/bin/brew shellenv)"
+  echo "INFO: Homebrew environment loaded"
 fi
 
 # Back-compat: some docs/scripts assume /data; point it at /config.
