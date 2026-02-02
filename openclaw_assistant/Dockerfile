@@ -39,14 +39,17 @@ RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
 # Install Homebrew (Linuxbrew) in the default Linux prefix
 # Brew is the default package manager for OpenClaw
 # https://docs.openclaw.ai/platforms/mac/skills#install-actions
+ARG LINUXBREW_UID=1000
 ENV HOMEBREW_PREFIX=/home/linuxbrew/.linuxbrew
 ENV HOMEBREW_CELLAR=${HOMEBREW_PREFIX}/Cellar \
     HOMEBREW_REPOSITORY=${HOMEBREW_PREFIX}/Homebrew \
     PATH=${HOMEBREW_PREFIX}/bin:${HOMEBREW_PREFIX}/sbin:${PATH} \
     HOMEBREW_NO_ANALYTICS=1 \
-    HOMEBREW_NO_AUTO_UPDATE=1
+    HOMEBREW_NO_AUTO_UPDATE=1 \
+    HOMEBREW_NO_ENV_HINTS=1 \
+    HOMEBREW_NO_INSTALL_CLEANUP=1
 
-RUN useradd -m -s /bin/bash linuxbrew \
+RUN useradd -m -s /bin/bash -u "${LINUXBREW_UID}" linuxbrew \
  && echo 'linuxbrew ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers \
  && mkdir -p "$HOMEBREW_PREFIX" \
  && chown -R linuxbrew:linuxbrew /home/linuxbrew
