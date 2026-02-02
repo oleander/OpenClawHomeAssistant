@@ -45,14 +45,24 @@ mkdir -p /config/.openclaw /config/clawd /config/keys /config/secrets
 # This ensures all brew packages persist across container restarts
 if [ ! -d /config/.linuxbrew ] || [ ! -f /config/.linuxbrew/bin/brew ]; then
   echo "INFO: Installing Homebrew to /config/.linuxbrew (first boot, this may take 5-10 minutes)..."
-  mkdir -p /config/.linuxbrew
-  cd /config/.linuxbrew
+  mkdir -p /config/.linuxbrew || {
+    echo "ERROR: Failed to create /config/.linuxbrew directory"
+    echo "INFO: Homebrew will not be available"
+    exit 1
+  }
+  cd /config/.linuxbrew || {
+    echo "ERROR: Failed to change to /config/.linuxbrew directory"
+    echo "INFO: Homebrew will not be available"
+    exit 1
+  }
   
   # Install Homebrew directly to /config/.linuxbrew
   export HOMEBREW_PREFIX="/config/.linuxbrew"
   export HOMEBREW_REPOSITORY="/config/.linuxbrew/Homebrew"
   
   # Download and run Homebrew installer
+  # Note: The official Homebrew installer does not provide checksums, but it's served over HTTPS
+  # and the script itself verifies downloads. This is the recommended installation method per Homebrew docs.
   NONINTERACTIVE=1 CI=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" || {
     echo "ERROR: Failed to install Homebrew"
     echo "INFO: Homebrew will not be available, but the add-on will continue"
@@ -69,7 +79,7 @@ else
 fi
 
 # Initialize Homebrew environment in /config/.bashrc for agent and user sessions
-if [ ! -f /config/.bashrc ] || ! grep -q "brew shellenv" /config/.bashrc; then
+if [ ! -f /config/.bashrc ] || ! grep -s -q "brew shellenv" /config/.bashrc; then
   echo "" >> /config/.bashrc
   echo '# Initialize Homebrew environment' >> /config/.bashrc
   echo 'if [ -f /config/.linuxbrew/bin/brew ]; then' >> /config/.bashrc
