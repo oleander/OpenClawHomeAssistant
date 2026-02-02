@@ -5,6 +5,7 @@ FROM ${BUILD_FROM}
 # that occur on Alpine (e.g. clipboard, node-llama-cpp).
 
 # Install base packages (without nodejs/npm - we'll get Node 22 from NodeSource)
+# Includes build-essential and vim as recommended by Homebrew
 RUN apt-get update && apt-get install -y --no-install-recommends \
     bash \
     git \
@@ -19,6 +20,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 \
     nginx \
     gnupg \
+    build-essential \
+    vim \
+    procps \
  && apt-get clean \
  && rm -rf /var/lib/apt/lists/*
 
@@ -27,6 +31,14 @@ RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
  && apt-get install -y nodejs \
  && apt-get clean \
  && rm -rf /var/lib/apt/lists/*
+
+# Install Homebrew to default location /home/linuxbrew/.linuxbrew
+# (will be moved to /config on first boot for persistence)
+RUN mkdir -p /home/linuxbrew \
+ && useradd -m -s /bin/bash linuxbrew || true \
+ && chown -R linuxbrew:linuxbrew /home/linuxbrew \
+ && su - linuxbrew -c "NONINTERACTIVE=1 /bin/bash -c \"\$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\"" \
+ && su - linuxbrew -c "/home/linuxbrew/.linuxbrew/bin/brew install gcc"
 
 # Install ttyd (web terminal) - not in Debian repos, download binary
 # Docker TARGETARCH: amd64, arm64, arm/v7 → ttyd filenames: x86_64, aarch64, armhf

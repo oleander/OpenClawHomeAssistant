@@ -41,6 +41,33 @@ set +x
 export HOME=/config
 mkdir -p /config/.openclaw /config/clawd /config/keys /config/secrets
 
+# Move Homebrew from Docker image to /config for persistence (first boot only)
+if [ ! -L /home/linuxbrew/.linuxbrew ] && [ -d /home/linuxbrew/.linuxbrew ]; then
+  echo "INFO: Moving Homebrew from image to /config/.linuxbrew for persistence..."
+  mv /home/linuxbrew/.linuxbrew /config/.linuxbrew
+  ln -s /config/.linuxbrew /home/linuxbrew/.linuxbrew
+  echo "INFO: Homebrew moved to /config/.linuxbrew"
+elif [ ! -d /home/linuxbrew/.linuxbrew ] && [ ! -L /home/linuxbrew/.linuxbrew ]; then
+  # Homebrew not in image and not yet persisted - create symlink for future
+  if [ -d /config/.linuxbrew ]; then
+    mkdir -p /home/linuxbrew
+    ln -s /config/.linuxbrew /home/linuxbrew/.linuxbrew
+    echo "INFO: Linked /home/linuxbrew/.linuxbrew to existing /config/.linuxbrew"
+  fi
+fi
+
+# Initialize Homebrew environment in /config/.bashrc for agent and user sessions
+if [ ! -f /config/.bashrc ] || ! grep -q "brew shellenv" /config/.bashrc; then
+  echo "" >> /config/.bashrc
+  echo 'eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"' >> /config/.bashrc
+  echo "INFO: Added brew shellenv to /config/.bashrc"
+fi
+
+# Set up brew environment for this script
+if [ -d /home/linuxbrew/.linuxbrew/bin ]; then
+  eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
+fi
+
 # Back-compat: some docs/scripts assume /data; point it at /config.
 if [ ! -e /data ]; then
   ln -s /config /data || true
