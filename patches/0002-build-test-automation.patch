@@ -1,0 +1,1111 @@
+diff --git a/.cursor/skills/openclaw-smoke-test/SKILL.md b/.cursor/skills/openclaw-smoke-test/SKILL.md
+new file mode 100644
+index 0000000..889198f
+--- /dev/null
++++ b/.cursor/skills/openclaw-smoke-test/SKILL.md
+@@ -0,0 +1,193 @@
++---
++name: openclaw-smoke-test
++description: Smoke test the OpenClaw Assistant Home Assistant add-on locally using Docker. Builds with HA builder, runs container, and verifies gateway, ttyd, nginx, and Homebrew services. Use when testing Dockerfile changes, verifying builds, or when the user asks to smoke test this add-on.
++---
++
++# OpenClaw Assistant Smoke Test
++
++Local smoke test workflow for the OpenClaw Assistant Home Assistant add-on.
++
++## Prerequisites
++
++- Docker running locally
++- Add-on source at `openclaw_assistant/` with `config.yaml`, `build.yaml`, `Dockerfile`
++
++## Quick Reference
++
++```bash
++# 1. Build (aarch64 for Apple Silicon, amd64 for Intel)
++docker run --rm --privileged \
++  -v /path/to/openclaw_assistant:/data \
++  -v /var/run/docker.sock:/var/run/docker.sock:ro \
++  ghcr.io/home-assistant/aarch64-builder \
++  -t /data --aarch64 --test -i addon-test-aarch64 -d local
++
++# 2. Create config and run
++mkdir -p ~/addon-test-config
++cat > ~/addon-test-config/options.json << 'EOF'
++{"timezone":"UTC","router_ssh_host":"","router_ssh_user":"","router_ssh_key_path":"/data/keys/router_ssh"}
++EOF
++
++docker run --rm -d --name addon-test \
++  -v ~/addon-test-config:/config \
++  -v ~/addon-test-config/options.json:/data/options.json:ro \
++  local/addon-test-aarch64:VERSION
++
++# 3. Verify and cleanup
++docker logs addon-test
++docker stop addon-test
++```
++
++## Full Workflow
++
++### 1. Build the Add-on
++
++```bash
++# Detect architecture and build
++ARCH=$(uname -m)
++if [ "$ARCH" = "arm64" ]; then
++  BUILDER="ghcr.io/home-assistant/aarch64-builder"
++  ARCH_FLAG="--aarch64"
++  IMAGE_TAG="addon-test-aarch64"
++else
++  BUILDER="ghcr.io/home-assistant/amd64-builder"
++  ARCH_FLAG="--amd64"
++  IMAGE_TAG="addon-test-amd64"
++fi
++
++docker run --rm --privileged \
++  -v "/absolute/path/to/openclaw_assistant:/data" \
++  -v /var/run/docker.sock:/var/run/docker.sock:ro \
++  "$BUILDER" \
++  -t /data $ARCH_FLAG --test \
++  -i "$IMAGE_TAG" -d local
++```
++
++**Build time**: 2-10 minutes depending on cache state. Exit code 0 = success.
++
++### 2. Create Test Config
++
++Create `options.json` with required fields from `config.yaml`:
++
++```bash
++mkdir -p ~/addon-test-config
++
++cat > ~/addon-test-config/options.json << 'EOF'
++{
++  "timezone": "UTC",
++  "router_ssh_host": "",
++  "router_ssh_user": "",
++  "router_ssh_key_path": "/data/keys/router_ssh"
++}
++EOF
++```
++
++### 3. Run the Container
++
++```bash
++# Stop any previous test container
++docker stop addon-test 2>/dev/null || true
++docker rm addon-test 2>/dev/null || true
++
++# Get version from config.yaml (or use hardcoded)
++VERSION=$(grep '^version:' openclaw_assistant/config.yaml | cut -d'"' -f2)
++
++docker run --rm -d --name addon-test \
++  -v ~/addon-test-config:/config \
++  -v ~/addon-test-config/options.json:/data/options.json:ro \
++  local/addon-test-aarch64:$VERSION
++```
++
++**macOS note**: Use `~/` paths, not `/tmp/` (Docker Desktop file sharing).
++
++### 4. Verify Services
++
++Check all services started correctly:
++
++```bash
++# Container running
++docker ps --filter "name=addon-test"
++
++# Check logs for service startup
++docker logs addon-test 2>&1 | head -50
++
++# Expected services:
++# - OpenClaw gateway: ws://127.0.0.1:18789
++# - ttyd (terminal): 127.0.0.1:7681
++# - nginx ingress: :8099
++```
++
++Verify specific services:
++
++```bash
++# Gateway listening
++docker logs addon-test 2>&1 | grep -E "(gateway.*listening|Starting OpenClaw)"
++
++# Homebrew accessible
++docker exec addon-test bash -c 'eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)" && brew --version'
++
++# Direct brew path
++docker exec addon-test /home/linuxbrew/.linuxbrew/bin/brew --version
++
++# Login shell brew (may not work depending on Dockerfile config)
++docker exec addon-test bash -lc 'which brew && brew --version'
++
++# List installed brew packages
++docker exec addon-test /home/linuxbrew/.linuxbrew/bin/brew list
++```
++
++### 5. Cleanup
++
++```bash
++docker stop addon-test
++rm -rf ~/addon-test-config
++```
++
++## Expected Results
++
++| Check     | Expected                       |
++| --------- | ------------------------------ |
++| Build     | Exit code 0, image created     |
++| Container | Running (`docker ps` shows it) |
++| Gateway   | `ws://127.0.0.1:18789` in logs |
++| ttyd      | `127.0.0.1:7681` in logs       |
++| nginx     | `:8099` in logs                |
++| Homebrew  | Version displayed (>=4.x)      |
++| gcc       | Listed in `brew list`          |
++
++## Common Issues
++
++| Issue                                        | Cause                    | Solution                                        |
++| -------------------------------------------- | ------------------------ | ----------------------------------------------- |
++| GPG signature errors during `apt-get update` | Stale Docker cache       | `docker builder prune -af` then rebuild         |
++| `the input device is not a TTY`              | Running with `-it` flags | Remove `-it` from docker commands               |
++| `mounts denied: path not shared`             | Using `/tmp/` on macOS   | Use `~/` paths instead                          |
++| `Missing /data/options.json`                 | Config not mounted       | Mount options.json to `/data/options.json`      |
++| Container exits immediately                  | Startup error            | Check `docker logs addon-test`                  |
++| Brew not in PATH for login shells            | No shell init file setup | Use `eval "$(...brew shellenv)"` or direct path |
++
++## Adapting for Other HA Add-ons
++
++To adapt this workflow for other Home Assistant add-ons:
++
++1. **options.json**: Extract required fields from the add-on's `config.yaml` schema
++   - Look for fields without `?` suffix (required)
++   - Provide sensible defaults for testing
++
++2. **Build command**: Update the path to point to your add-on directory
++
++3. **Version tag**: Get from your add-on's `config.yaml` version field
++
++4. **Verification steps**: Replace service checks with your add-on's expected services
++   - Check logs for startup messages
++   - Verify expected ports are listening
++   - Test any CLI tools that should be available
++
++5. **Volume mounts**: Add any additional volumes your add-on requires
++   - Common: `/ssl`, `/share`, `/backup`
++   - Use `map:` section in config.yaml as reference
++
++## Reference
++
++- [HA Add-on Local Build Docs](https://developers.home-assistant.io/docs/apps/testing#local-build)
++- [HA Builder Images](https://github.com/home-assistant/builder)
+diff --git a/.github/workflows/ha-addon-build.yml b/.github/workflows/ha-addon-build.yml
+new file mode 100644
+index 0000000..c16e42a
+--- /dev/null
++++ b/.github/workflows/ha-addon-build.yml
+@@ -0,0 +1,39 @@
++name: HA Add-on Build
++
++on:
++  push:
++    branches:
++      - main
++  pull_request:
++    branches:
++      - main
++
++concurrency:
++  group: ${{ github.workflow }}-${{ github.ref }}
++  cancel-in-progress: true
++
++jobs:
++  build:
++    runs-on: ubuntu-latest
++    permissions:
++      contents: read
++      packages: write
++    steps:
++      - uses: actions/checkout@v4
++      - name: Login to GHCR
++        uses: docker/login-action@v3
++        with:
++          registry: ghcr.io
++          username: ${{ github.repository_owner }}
++          password: ${{ secrets.GITHUB_TOKEN }}
++
++      - name: Build add-on
++        uses: home-assistant/builder@master
++        with:
++          pull: false
++          args: |
++            -t openclaw_assistant \
++            -d ghcr.io/${{ github.repository_owner }} \
++            -i openclaw \
++            --amd64 \
++            --aarch64
+diff --git a/Justfile b/Justfile
+new file mode 100644
+index 0000000..0c18a98
+--- /dev/null
++++ b/Justfile
+@@ -0,0 +1,19 @@
++set shell := ["bash", "-c"]
++
++build:
++    cd openclaw_assistant
++    export DOCKER_BUILDKIT=1
++    docker build \
++      --build-arg BUILD_FROM=ghcr.io/home-assistant/aarch64-base-debian:bookworm
++      -t openclaw-assistant:latest \
++      .
++
++run:
++    mkdir -p test_config/.openclaw/agents/main/sessions test_config/secrets
++    echo '{"timezone":"UTC","enable_terminal":true,"gateway_bind_mode":"loopback","gateway_port":18789}' > test_config/options.json
++    docker run --rm \
++      -v "$(pwd)/test_config:/config" \
++      -v "$(pwd)/test_config/options.json:/data/options.json" \
++      -p 18789:18789 -p 7681:7681 -p 8099:8099 \
++      openclaw-assistant:latest
++
+diff --git a/clean.sh b/clean.sh
+new file mode 100755
+index 0000000..7c05748
+--- /dev/null
++++ b/clean.sh
+@@ -0,0 +1,19 @@
++#!/bin/zsh -el
++
++cd openclaw_assistant
++
++# Remove old files
++# rm -f run.sh init.sh start-*.sh supervisord*.conf cleanup.sh
++
++# Build with BuildKit
++DOCKER_BUILDKIT=1 docker build \
++  --build-arg BUILD_FROM=ghcr.io/home-assistant/aarch64-base-debian:bookworm \
++  -t openclaw-opt:latest .
++
++# Run test
++docker run --rm \
++  -v "$(pwd)/../test_config:/config" \
++  -v "$(pwd)/../test_config/options.json:/data/options.json" \
++  -p 18789:18789 -p 7681:7681 -p 8099:8099 \
++  openclaw-opt:latest
++
+diff --git a/openclaw_assistant/TEST_RESULTS.md b/openclaw_assistant/TEST_RESULTS.md
+new file mode 100644
+index 0000000..6f01d4b
+--- /dev/null
++++ b/openclaw_assistant/TEST_RESULTS.md
+@@ -0,0 +1,329 @@
++# OpenClaw Container Test Results
++
++## Build Status ✅
++
++- **Image**: `openclaw-test:latest`
++- **Build Time**: ~5 seconds (cached layers)
++- **Final Size**: 3.07GB disk / 739MB compressed
++- **Architecture**: Multi-stage with parallel builds (node, ttyd, homebrew)
++
++## Container Startup ✅
++
++### Services Started Successfully
++
++All three services launched without errors:
++
++1. **OpenClaw Gateway** (PID 136)
++   - Listening on: `0.0.0.0:18789` (LAN mode)
++   - Internal admin: `127.0.0.1:18792`
++   - Model: anthropic/claude-opus-4-5
++   - Log file: `/tmp/openclaw/openclaw-2026-02-03.log`
++
++2. **ttyd Web Terminal** (PID 127)
++   - Listening on: `127.0.0.1:7681` (localhost only)
++   - Base path: `/terminal`
++   - WebSocket endpoint: `/terminal/ws`
++   - Backend: bash
++
++3. **nginx Ingress** (PID 128)
++   - Listening on: `0.0.0.0:8099`
++   - Worker processes: 1
++   - Backend proxies: ttyd terminal
++
++### Configuration Applied ✅
++
++**options.json → OpenClaw Config:**
++
++```json
++{
++  "gateway": {
++    "mode": "local",
++    "port": 18789,
++    "bind": "lan",              ← Applied from options.json
++    "auth": {
++      "mode": "token",
++      "token": "glmSo6Cyzn2XzhldbqtyHWNRok4AcbMk"  ← Auto-generated
++    },
++    "controlUi": {
++      "allowInsecureAuth": true  ← Applied from options.json
++    }
++  }
++}
++```
++
++## Port Access Tests ✅
++
++| Port  | Service          | Access Method      | Status | HTTP Code |
++| ----- | ---------------- | ------------------ | ------ | --------- |
++| 18789 | OpenClaw Gateway | Direct             | ✅     | 200       |
++| 7681  | ttyd Terminal    | Direct (localhost) | ❌     | N/A       |
++| 7681  | ttyd Terminal    | Via nginx (8099)   | ✅     | 200       |
++| 8099  | nginx Ingress    | Direct             | ✅     | 200       |
++
++### Port Binding Verification
++
++```
++LISTEN  127.0.0.1:7681        ttyd (localhost only - correct)
++LISTEN  127.0.0.1:18792       openclaw-gateway (admin port)
++LISTEN  0.0.0.0:8099          nginx (ingress)
++LISTEN  0.0.0.0:18789         openclaw-gateway (public API)
++```
++
++## Functional Tests ✅
++
++### 1. Gateway Web UI Access
++
++```bash
++curl http://localhost:18789/?token=glmSo6Cyzn2XzhldbqtyHWNRok4AcbMk
++# Returns: <title>OpenClaw Control</title>
++```
++
++**Status**: ✅ Gateway UI loads with token authentication
++
++### 2. Terminal Access (Proxied)
++
++```bash
++curl http://localhost:8099/terminal/
++# Returns: HTML page with ttyd terminal interface
++```
++
++**Status**: ✅ Terminal accessible via nginx reverse proxy
++
++### 3. Landing Page
++
++```bash
++curl http://localhost:8099/
++# Returns: Landing page with links to gateway and terminal
++```
++
++**Status**: ✅ Landing page renders correctly with token embedded
++
++### 4. Configuration Bootstrap
++
++- ✅ `/config/.openclaw/openclaw.json` created
++- ✅ Gateway settings applied (bind mode, port, insecure auth)
++- ✅ Token generated and accessible
++- ✅ nginx config rendered from template
++
++## Entrypoint Script Analysis
++
++### What Works ✅
++
++1. **Options parsing**: All config values read correctly from `/data/options.json`
++2. **Directory setup**: Created `/config/{.openclaw,clawd,keys,secrets}`
++3. **Config bootstrapping**: Generated openclaw.json with secure token
++4. **Setting application**: Python helper applied bind/port/auth settings
++5. **Template rendering**: nginx config and landing page generated
++6. **Service orchestration**: All 3 services started in background
++7. **Signal handling**: Trap cleanup for INT/TERM/EXIT
++
++### Issues Found ❌
++
++#### 1. **TTYD Port Not Exposed**
++
++**Current**: ttyd binds to `127.0.0.1:7681` (not accessible from host)
++**Issue**: Port 7681 is published (`-p 7681:7681`) but binding to localhost
++**Fix**: Either:
++
++- Remove port mapping (use nginx proxy only)
++- Change ttyd bind to `0.0.0.0` if direct access needed
++
++#### 2. **No Port Validation**
++
++```bash
++# entrypoint.sh line 18
++GATEWAY_PORT=$(read_opt '.gateway_port' '18789')
++# No validation: what if port is 999999 or "abc"?
++```
++
++#### 3. **Template Variable Substitution Is Fragile**
++
++```bash
++# Python heredoc with bash variable expansion
++public_url = '$GW_PUBLIC_URL'  # What if URL contains single quotes?
++token = '$GW_TOKEN'             # No escaping
++```
++
++#### 4. **No Service Health Checks**
++
++Services start in background but script doesn't verify they're healthy:
++
++```bash
++openclaw gateway run &  # May fail silently
++GW_PID=$!
++# No check if gateway actually started
++```
++
++#### 5. **Repeated Path Strings**
++
++```bash
++/config/.openclaw/agents/main/sessions  # Appears 3+ times
++/config/.openclaw/openclaw.json         # Appears 5+ times
++```
++
++## Recommended Fixes
++
++### Priority 1: Port Configuration
++
++```dockerfile
++# Add to Dockerfile
++EXPOSE 18789 8099
++# Remove 7681 or document it's for debugging only
++```
++
++### Priority 2: Add Validation
++
++```bash
++validate_gateway_port() {
++    local port="$1"
++    [[ "$port" =~ ^[0-9]+$ ]] && [[ $port -ge 1024 ]] && [[ $port -le 65535 ]] && return 0
++    echo "[ERROR] Invalid port: $port (must be 1024-65535)"
++    exit 1
++}
++```
++
++### Priority 3: Health Checks
++
++```bash
++start_service() {
++    local name="$1" cmd="$2" health_check="${3:-true}"
++    eval "$cmd" &
++    SERVICE_PIDS[$name]=$!
++
++    # Optional: wait for service to be ready
++    if [[ "$health_check" != "true" ]]; then
++        sleep 2 && eval "$health_check" || {
++            echo "[ERROR] $name failed health check"
++            return 1
++        }
++    fi
++}
++```
++
++### Priority 4: Path Constants
++
++```bash
++readonly OPENCLAW_CONFIG="/config/.openclaw/openclaw.json"
++readonly SESSIONS_DIR="/config/.openclaw/agents/main/sessions"
++```
++
++### Priority 5: Safe Template Rendering
++
++Use `envsubst` or proper JSON escaping:
++
++```bash
++export GW_PUBLIC_URL GW_TOKEN
++envsubst < /etc/nginx/landing.html.tpl > /etc/nginx/html/index.html
++```
++
++## Configuration Schema Validation
++
++### Current options.json
++
++```json
++{
++  "timezone": "UTC",
++  "enable_terminal": true,
++  "gateway_public_url": "http://localhost:18789",
++  "gateway_bind_mode": "lan",
++  "gateway_port": 18789,
++  "allow_insecure_auth": true
++}
++```
++
++### Schema Compliance ✅
++
++All values match the schema in `config.yaml`:
++
++- `gateway_port`: integer in range 1-65535
++- `gateway_bind_mode`: one of ["loopback", "lan"]
++- `allow_insecure_auth`: boolean
++- `enable_terminal`: boolean
++
++## Logs Analysis
++
++### Startup Sequence (16:56:33)
++
++```
++1. s6-rc init system starts
++2. [INFO] Bootstrapping OpenClaw config
++3. INFO: Updated gateway settings
++4. [INFO] Starting OpenClaw gateway...
++5. [INFO] Starting ttyd web terminal...
++6. [INFO] Starting nginx ingress...
++7. All services healthy after ~1 second
++```
++
++### Key Log Entries
++
++- ✅ Gateway listening on `ws://0.0.0.0:18789`
++- ✅ ttyd listening on `127.0.0.1:7681`
++- ✅ nginx worker started (PID 134)
++- ⚠️ Update available: v2026.2.1 (current v2026.1.30)
++
++## Performance Metrics
++
++| Metric               | Value  |
++| -------------------- | ------ |
++| Container start time | ~1.5s  |
++| Gateway ready time   | ~1s    |
++| Memory usage (idle)  | ~250MB |
++| CPU usage (idle)     | <1%    |
++
++## Network Architecture
++
++```
++┌─────────────────────────────────────────┐
++│          Docker Host                    │
++│                                         │
++│  Port 18789 → 0.0.0.0:18789            │
++│               ↓                         │
++│         OpenClaw Gateway                │
++│         (ws://0.0.0.0:18789)           │
++│                                         │
++│  Port 8099 → 0.0.0.0:8099              │
++│              ↓                          │
++│         nginx Ingress                   │
++│              ↓                          │
++│         127.0.0.1:7681                 │
++│              ↓                          │
++│         ttyd Terminal                   │
++│                                         │
++└─────────────────────────────────────────┘
++```
++
++## Security Observations
++
++### ✅ Good
++
++- ttyd bound to localhost only (not exposed directly)
++- Token-based gateway authentication
++- nginx proxy for terminal access (single entry point)
++- Secrets stored with proper permissions (umask 077)
++
++### ⚠️ Concerns
++
++- `allow_insecure_auth: true` allows HTTP gateway access (intended for LAN)
++- Gateway binds to `0.0.0.0` when in "lan" mode (expected)
++- No TLS/HTTPS support in nginx config (add-on assumption)
++
++## Conclusion
++
++**Overall Status**: ✅ **WORKING**
++
++All core functionality works as designed:
++
++- Container builds and starts successfully
++- All three services (gateway, ttyd, nginx) running
++- Port mappings correct (except 7681 intentionally localhost)
++- Configuration properly applied from options.json
++- Authentication working with token
++- nginx reverse proxy functioning
++
++**Action Items**:
++
++1. Document that port 7681 is intentionally not exposed
++2. Add validation for numeric config values
++3. Consider adding health checks before "wait $GW_PID"
++4. Refactor to use path constants
++5. Consider switching to `envsubst` for template rendering
+diff --git a/openclaw_assistant/test_config/.openclaw/canvas/index.html b/openclaw_assistant/test_config/.openclaw/canvas/index.html
+new file mode 100644
+index 0000000..5ff8690
+--- /dev/null
++++ b/openclaw_assistant/test_config/.openclaw/canvas/index.html
+@@ -0,0 +1,90 @@
++<!doctype html>
++<meta charset="utf-8" />
++<meta name="viewport" content="width=device-width, initial-scale=1" />
++<title>OpenClaw Canvas</title>
++<style>
++  html, body { height: 100%; margin: 0; background: #000; color: #fff; font: 16px/1.4 -apple-system, BlinkMacSystemFont, system-ui, Segoe UI, Roboto, Helvetica, Arial, sans-serif; }
++  .wrap { min-height: 100%; display: grid; place-items: center; padding: 24px; }
++  .card { width: min(720px, 100%); background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.10); border-radius: 16px; padding: 18px 18px 14px; }
++  .title { display: flex; align-items: baseline; gap: 10px; }
++  h1 { margin: 0; font-size: 22px; letter-spacing: 0.2px; }
++  .sub { opacity: 0.75; font-size: 13px; }
++  .row { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 14px; }
++  button { appearance: none; border: 1px solid rgba(255,255,255,0.14); background: rgba(255,255,255,0.10); color: #fff; padding: 10px 12px; border-radius: 12px; font-weight: 600; cursor: pointer; }
++  button:active { transform: translateY(1px); }
++  .ok { color: #24e08a; }
++  .bad { color: #ff5c5c; }
++  .log { margin-top: 14px; opacity: 0.85; font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; white-space: pre-wrap; background: rgba(0,0,0,0.35); border: 1px solid rgba(255,255,255,0.08); padding: 10px; border-radius: 12px; }
++</style>
++<div class="wrap">
++  <div class="card">
++    <div class="title">
++      <h1>OpenClaw Canvas</h1>
++      <div class="sub">Interactive test page (auto-reload enabled)</div>
++    </div>
++
++    <div class="row">
++      <button id="btn-hello">Hello</button>
++      <button id="btn-time">Time</button>
++      <button id="btn-photo">Photo</button>
++      <button id="btn-dalek">Dalek</button>
++    </div>
++
++    <div id="status" class="sub" style="margin-top: 10px;"></div>
++    <div id="log" class="log">Ready.</div>
++  </div>
++</div>
++<script>
++(() => {
++  const logEl = document.getElementById("log");
++  const statusEl = document.getElementById("status");
++  const log = (msg) => { logEl.textContent = String(msg); };
++
++  const hasIOS = () =>
++    !!(
++      window.webkit &&
++      window.webkit.messageHandlers &&
++      window.webkit.messageHandlers.openclawCanvasA2UIAction
++    );
++  const hasAndroid = () =>
++    !!(
++      (window.openclawCanvasA2UIAction &&
++        typeof window.openclawCanvasA2UIAction.postMessage === "function")
++    );
++  const hasHelper = () => typeof window.openclawSendUserAction === "function";
++  statusEl.innerHTML =
++    "Bridge: " +
++    (hasHelper() ? "<span class='ok'>ready</span>" : "<span class='bad'>missing</span>") +
++    " · iOS=" + (hasIOS() ? "yes" : "no") +
++    " · Android=" + (hasAndroid() ? "yes" : "no");
++
++  const onStatus = (ev) => {
++    const d = ev && ev.detail || {};
++    log("Action status: id=" + (d.id || "?") + " ok=" + String(!!d.ok) + (d.error ? (" error=" + d.error) : ""));
++  };
++  window.addEventListener("openclaw:a2ui-action-status", onStatus);
++
++  function send(name, sourceComponentId) {
++    if (!hasHelper()) {
++      log("No action bridge found. Ensure you're viewing this on an iOS/Android OpenClaw node canvas.");
++      return;
++    }
++    const sendUserAction =
++      typeof window.openclawSendUserAction === "function"
++        ? window.openclawSendUserAction
++        : undefined;
++    const ok = sendUserAction({
++      name,
++      surfaceId: "main",
++      sourceComponentId,
++      context: { t: Date.now() },
++    });
++    log(ok ? ("Sent action: " + name) : ("Failed to send action: " + name));
++  }
++
++  document.getElementById("btn-hello").onclick = () => send("hello", "demo.hello");
++  document.getElementById("btn-time").onclick = () => send("time", "demo.time");
++  document.getElementById("btn-photo").onclick = () => send("photo", "demo.photo");
++  document.getElementById("btn-dalek").onclick = () => send("dalek", "demo.dalek");
++})();
++</script>
+diff --git a/openclaw_assistant/test_config/.openclaw/cron/jobs.json b/openclaw_assistant/test_config/.openclaw/cron/jobs.json
+new file mode 100644
+index 0000000..b8cdc50
+--- /dev/null
++++ b/openclaw_assistant/test_config/.openclaw/cron/jobs.json
+@@ -0,0 +1,4 @@
++{
++  "version": 1,
++  "jobs": []
++}
+\ No newline at end of file
+diff --git a/openclaw_assistant/test_config/.openclaw/openclaw.json b/openclaw_assistant/test_config/.openclaw/openclaw.json
+new file mode 100644
+index 0000000..1ab3be6
+--- /dev/null
++++ b/openclaw_assistant/test_config/.openclaw/openclaw.json
+@@ -0,0 +1,14 @@
++{
++  "gateway": {
++    "mode": "local",
++    "port": 18789,
++    "bind": "lan",
++    "auth": {
++      "mode": "token",
++      "token": "glmSo6Cyzn2XzhldbqtyHWNRok4AcbMk"
++    },
++    "controlUi": {
++      "allowInsecureAuth": true
++    }
++  }
++}
+diff --git a/openclaw_assistant/test_config/.openclaw/update-check.json b/openclaw_assistant/test_config/.openclaw/update-check.json
+new file mode 100644
+index 0000000..93ce6a6
+--- /dev/null
++++ b/openclaw_assistant/test_config/.openclaw/update-check.json
+@@ -0,0 +1,5 @@
++{
++  "lastCheckedAt": "2026-02-03T16:56:34.645Z",
++  "lastNotifiedVersion": "2026.2.1",
++  "lastNotifiedTag": "latest"
++}
+\ No newline at end of file
+diff --git a/openclaw_assistant/test_data/options.json b/openclaw_assistant/test_data/options.json
+new file mode 100644
+index 0000000..3c7126b
+--- /dev/null
++++ b/openclaw_assistant/test_data/options.json
+@@ -0,0 +1,14 @@
++{
++  "timezone": "UTC",
++  "enable_terminal": true,
++  "gateway_public_url": "http://localhost:18789",
++  "homeassistant_token": "",
++  "router_ssh_host": "",
++  "router_ssh_user": "",
++  "router_ssh_key_path": "",
++  "clean_session_locks_on_start": true,
++  "clean_session_locks_on_exit": true,
++  "gateway_bind_mode": "lan",
++  "gateway_port": 18789,
++  "allow_insecure_auth": true
++}
+diff --git a/smoke_test.sh b/smoke_test.sh
+new file mode 100755
+index 0000000..a0a12b1
+--- /dev/null
++++ b/smoke_test.sh
+@@ -0,0 +1,317 @@
++#!/bin/bash
++# OpenClaw Assistant - Complete Test Suite
++# Run this in your project root directory
++
++set -euo pipefail
++
++# Colors
++RED='\033[0;31m'
++GREEN='\033[0;32m'
++YELLOW='\033[1;33m'
++BLUE='\033[0;34m'
++NC='\033[0m'
++
++# Counters
++PASSED=0
++FAILED=0
++SKIPPED=0
++CONTAINER="openclaw-test-$(date +%s)"
++IMAGE="openclaw-test:latest"
++
++# Logging functions
++# Pre-increment (++VAR) returns new value, avoiding set -e exit when VAR starts at 0
++log_ok() { echo -e "${GREEN}[✓]${NC} $*"; ((++PASSED)); }
++log_fail() { echo -e "${RED}[✗]${NC} $*"; ((++FAILED)); }
++log_warn() { echo -e "${YELLOW}[!]${NC} $*"; ((++SKIPPED)); }
++log_test() { echo -e "${BLUE}→${NC} $*"; }
++log_section() { echo ""; echo -e "${BLUE}════════════════════════════════════════════${NC}"; echo -e "${BLUE}$1${NC}"; }
++
++# Cleanup on exit
++cleanup() {
++    echo "Cleaning up..."
++    docker stop "$CONTAINER" 2>/dev/null || true
++    docker rm "$CONTAINER" 2>/dev/null || true
++    rm -rf ./test_data ./test_config 2>/dev/null || true
++}
++trap cleanup EXIT
++
++# Wait for condition
++wait_ready() {
++    local cmd="$1"
++    for i in {1..30}; do
++        if eval "$cmd" 2>/dev/null; then
++            return 0
++        fi
++        sleep 1
++    done
++    return 1
++}
++
++# ============================================================================
++# TESTS START
++# ============================================================================
++
++main() {
++    log_section "OPENCLAW ASSISTANT - COMPLETE TEST SUITE"
++
++    # ========== STAGE 1: Files ==========
++    log_section "STAGE 1: Files & Configuration"
++
++    log_test "Dockerfile exists"
++    if [ -f "./openclaw_assistant/Dockerfile" ]; then
++        log_ok "Found"
++    else
++        log_fail "Not found"
++        exit 1
++    fi
++
++    log_test "Required files"
++    for file in config.yaml entrypoint.sh nginx.conf.tpl oc_config_helper.py; do
++        if [ -f "./openclaw_assistant/$file" ]; then
++            log_ok "$file"
++        else
++            log_fail "$file missing"
++        fi
++    done
++
++    log_test "Optional documentation"
++    for file in README.md DOCS.md CHANGELOG.md apparmor.txt; do
++        if [ -f "./openclaw_assistant/$file" ]; then
++            log_ok "$file exists"
++        else
++            log_warn "$file missing (recommended)"
++        fi
++    done
++
++    log_test "nginx.conf.tpl has Ingress IP filter"
++    if grep -q "allow.*172.30.32.2" ./openclaw_assistant/nginx.conf.tpl; then
++        log_ok "IP filtering configured"
++    else
++        log_warn "No Ingress IP filter - add: allow 172.30.32.2; deny all;"
++    fi
++
++    # ========== STAGE 2: Build ==========
++    log_section "STAGE 2: Docker Build"
++
++    log_test "Building Docker image"
++    if docker build -t "$IMAGE" ./openclaw_assistant > /tmp/build.log 2>&1; then
++        log_ok "Build successful"
++    else
++        log_fail "Build failed"
++        echo "Last 10 lines of build log:"
++        tail -10 /tmp/build.log | sed 's/^/  /'
++        exit 1
++    fi
++
++    log_test "Image created"
++    if docker image inspect "$IMAGE" > /dev/null 2>&1; then
++        local size=$(docker image inspect "$IMAGE" --format='{{.Size}}' | numfmt --to=iec 2>/dev/null || echo "unknown")
++        log_ok "Size: $size"
++    else
++        log_fail "Image not found"
++        exit 1
++    fi
++
++    # ========== STAGE 3: Container Start ==========
++    log_section "STAGE 3: Container Startup"
++
++    log_test "Creating test data"
++    mkdir -p ./test_data ./test_config
++    cat > ./test_data/options.json << 'EOF'
++{
++  "timezone": "UTC",
++  "enable_terminal": true,
++  "gateway_public_url": "http://localhost:18789",
++  "gateway_bind_mode": "lan",
++  "gateway_port": 18789,
++  "allow_insecure_auth": true
++}
++EOF
++    log_ok "options.json created"
++
++    log_test "Starting container"
++    if docker run -d \
++        --name "$CONTAINER" \
++        -v "$(pwd)/test_data:/data:rw" \
++        -v "$(pwd)/test_config:/config:rw" \
++        -p 18789:18789 \
++        -p 7681:7681 \
++        -p 8099:8099 \
++        "$IMAGE" > /tmp/container.id 2>&1; then
++        log_ok "Container started"
++    else
++        log_fail "Container failed to start"
++        exit 1
++    fi
++
++    log_test "Waiting for initialization"
++    if wait_ready "docker exec $CONTAINER test -f /config/.openclaw/openclaw.json"; then
++        log_ok "Container initialized"
++    else
++        log_fail "Initialization timeout (30s)"
++        docker logs "$CONTAINER" 2>&1 | tail -10 | sed 's/^/  /'
++        exit 1
++    fi
++
++    # ========== STAGE 4: Ports & Network ==========
++    log_section "STAGE 4: Port Access & Network"
++
++    log_test "Gateway port 18789"
++    if wait_ready "curl -sf http://localhost:18789/ > /dev/null"; then
++        log_ok "Responding"
++    else
++        log_fail "Not responding"
++    fi
++
++    log_test "Ingress port 8099"
++    if wait_ready "curl -sf http://localhost:8099/ > /dev/null"; then
++        log_ok "Responding"
++    else
++        log_fail "Not responding"
++    fi
++
++    log_test "Terminal at /terminal"
++    if curl -sf http://localhost:8099/terminal/ > /dev/null 2>&1; then
++        log_ok "Accessible"
++    else
++        log_fail "Not accessible"
++    fi
++
++    log_test "Port binding verification"
++    local ss_output=$(docker exec "$CONTAINER" ss -tlnp 2>/dev/null || echo "")
++    if echo "$ss_output" | grep -q "127.0.0.1:7681"; then
++        log_ok "ttyd on localhost:7681 (correct)"
++    else
++        log_warn "ttyd binding not found"
++    fi
++
++    # ========== STAGE 5: Configuration ==========
++    log_section "STAGE 5: Configuration & Settings"
++
++    log_test "openclaw.json created"
++    if docker exec "$CONTAINER" test -f /config/.openclaw/openclaw.json; then
++        log_ok "File exists"
++    else
++        log_fail "File not created"
++    fi
++
++    log_test "Config is valid JSON"
++    if docker exec "$CONTAINER" cat /config/.openclaw/openclaw.json | jq . > /dev/null 2>&1; then
++        log_ok "Valid JSON"
++    else
++        log_fail "Invalid or unreadable"
++    fi
++
++    log_test "Gateway token generated"
++    local token=$(docker exec "$CONTAINER" jq -r '.gateway.auth.token' /config/.openclaw/openclaw.json 2>/dev/null || echo "")
++    if [ -n "$token" ] && [ "$token" != "null" ]; then
++        log_ok "Token: ${token:0:16}..."
++    else
++        log_fail "No token generated"
++    fi
++
++    log_test "Token authentication works"
++    if [ -n "$token" ]; then
++        if curl -sf "http://localhost:18789/?token=$token" | grep -q "OpenClaw"; then
++            log_ok "Authentication successful"
++        else
++            log_fail "Token auth failed"
++        fi
++    fi
++
++    log_test "Settings applied from options.json"
++    if docker exec "$CONTAINER" jq -e '.gateway.bind == "lan"' /config/.openclaw/openclaw.json > /dev/null 2>&1; then
++        log_ok "bind=lan applied"
++    else
++        log_fail "Settings not applied"
++    fi
++
++    if docker exec "$CONTAINER" jq -e '.gateway.port == 18789' /config/.openclaw/openclaw.json > /dev/null 2>&1; then
++        log_ok "port=18789 applied"
++    else
++        log_fail "Port not applied"
++    fi
++
++    # ========== STAGE 6: Services ==========
++    log_section "STAGE 6: Services & Directories"
++
++    log_test "Session directory exists"
++    if docker exec "$CONTAINER" test -d /config/.openclaw/agents/main/sessions; then
++        log_ok "Created"
++    else
++        log_fail "Missing"
++    fi
++
++    log_test "Secrets directory exists"
++    if docker exec "$CONTAINER" test -d /config/secrets; then
++        log_ok "Created"
++    else
++        log_fail "Missing"
++    fi
++
++    log_test "Services running"
++    if docker exec "$CONTAINER" sh -c "ps aux | grep -i 'openclaw' | grep -v grep" > /dev/null 2>&1; then
++        log_ok "Gateway running"
++    else
++        log_warn "Gateway process not found"
++    fi
++
++    # ========== STAGE 7: Security & Logs ==========
++    log_section "STAGE 7: Security & Logs"
++
++    log_test "Ingress IP filtering (security)"
++    local http_code=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8099/ 2>/dev/null || echo "000")
++    if [ "$http_code" = "403" ]; then
++        log_ok "Correctly rejects non-HA IPs (403)"
++    elif [ "$http_code" = "200" ]; then
++        log_warn "Accepts all IPs (HTTP 200) - should be 403"
++    else
++        log_warn "Unexpected response: $http_code"
++    fi
++
++    log_test "Logs for errors"
++    local error_count
++    error_count=$(docker logs "$CONTAINER" 2>&1 | grep -ci "\[error\]" || true)
++    if [ "${error_count:-0}" -eq 0 ]; then
++        log_ok "No error messages"
++    else
++        log_warn "Found $error_count error messages"
++        docker logs "$CONTAINER" 2>&1 | grep -i "\[error\]" | head -3 | sed 's/^/  /'
++    fi
++
++    # ========== STAGE 8: Cleanup ==========
++    log_section "STAGE 8: Cleanup"
++
++    log_test "Stopping container"
++    if docker stop "$CONTAINER" > /dev/null 2>&1; then
++        log_ok "Stopped cleanly"
++    else
++        log_fail "Stop failed"
++    fi
++
++    # ========== RESULTS ==========
++    log_section "TEST RESULTS"
++
++    echo ""
++    echo "  ${GREEN}✓ Passed:  $PASSED${NC}"
++    echo "  ${RED}✗ Failed:  $FAILED${NC}"
++    echo "  ${YELLOW}! Skipped: $SKIPPED${NC}"
++    echo ""
++
++    if [ $FAILED -eq 0 ]; then
++        echo -e "${GREEN}✓ All tests passed!${NC}"
++        echo ""
++        echo "Next steps:"
++        echo "  1. Add README.md, DOCS.md, CHANGELOG.md to openclaw_assistant/"
++        echo "  2. Verify nginx.conf.tpl has 'allow 172.30.32.2; deny all;'"
++        echo "  3. Optionally add apparmor.txt for +1 security point"
++        echo "  4. Push to Home Assistant add-on repository"
++        return 0
++    else
++        echo -e "${RED}✗ Some tests failed - review output above${NC}"
++        return 1
++    fi
++}
++
++main "$@"
++

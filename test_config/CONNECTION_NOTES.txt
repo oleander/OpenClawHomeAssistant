@@ -1,0 +1,2 @@
+Home Assistant token: /config/secrets/homeassistant.token
+Router SSH: host=, user=, key=/data/keys/router_ssh
