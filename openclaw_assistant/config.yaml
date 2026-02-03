@@ -10,11 +10,12 @@ arch:
 startup: services
 boot: auto
 init: false
-hassio_api: false
+hassio_api: true
 homeassistant_api: false
 host_network: true
 watchdog: tcp://[HOST]:[PORT:18789]
-webui: http://[HOST]:[PORT:8099]/
+webui: http://[HOST]:[PORT:7681]
+image: ghcr.io/oleander/openclaw:latest
 
 # Home Assistant Ingress (UI inside the add-on page)
 ingress: true
@@ -53,7 +54,7 @@ options:
   # - loopback: bind to 127.0.0.1 only (local access only, more secure)
   # - lan: bind to all interfaces (accessible from local network)
   # Default is loopback for security.
-  gateway_bind_mode: loopback
+  gateway_bind_mode: lan
 
   # Gateway port to listen on
   gateway_port: 18789

@@ -1,0 +1,1 @@
+{"timezone":"UTC","enable_terminal":true,"gateway_public_url":"http://localhost:18789","homeassistant_token":"","router_ssh_host":"","router_ssh_user":"","router_ssh_key_path":"/data/keys/router_ssh","clean_session_locks_on_start":true,"clean_session_locks_on_exit":true,"gateway_bind_mode":"loopback","gateway_port":18789,"allow_insecure_auth":false}

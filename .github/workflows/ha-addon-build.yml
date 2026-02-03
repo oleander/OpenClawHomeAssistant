@@ -1,0 +1,39 @@
+name: HA Add-on Build
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build add-on
+        uses: home-assistant/builder@master
+        with:
+          pull: false
+          args: |
+            -t openclaw_assistant \
+            -d ghcr.io/${{ github.repository_owner }} \
+            -i openclaw \
+            --amd64 \
+            --aarch64

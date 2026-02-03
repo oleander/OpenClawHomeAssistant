@@ -1,77 +1,57 @@
+# syntax=docker/dockerfile:1.7
 ARG BUILD_FROM
 FROM ${BUILD_FROM}
 
-# Base image is Debian Bookworm (glibc). This avoids musl-related native module issues
-# that occur on Alpine (e.g. clipboard, node-llama-cpp).
+# Use BuildKit cache mounts for faster rebuilds
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update && apt-get install -y --no-install-recommends \
+    bash git openssh-client ca-certificates tzdata jq curl \
+    tar xz-utils file python3 nginx gnupg build-essential sudo \
+    && rm -rf /var/lib/apt/lists/*
 
-# Install base packages (without nodejs/npm - we'll get Node 22 from NodeSource)
-# build-essential provides gcc/cc needed by Homebrew for OpenClaw's brew-managed dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    bash \
-    git \
-    openssh-client \
-    ca-certificates \
-    tzdata \
-    jq \
-    curl \
-    tar \
-    xz-utils \
-    file \
-    python3 \
-    nginx \
-    gnupg \
-    build-essential \
- && apt-get clean \
- && rm -rf /var/lib/apt/lists/*
+# Install Node.js 22 (OpenClaw requires 20+)
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
+    && apt-get install -y nodejs \
+    && rm -rf /var/lib/apt/lists/*
 
-# Install Node.js 22 LTS from NodeSource (Debian Bookworm ships Node 18, but OpenClaw requires 20+)
-RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
- && apt-get install -y nodejs \
- && apt-get clean \
- && rm -rf /var/lib/apt/lists/*
-
-# Install ttyd (web terminal) - not in Debian repos, download binary
-# Docker TARGETARCH: amd64, arm64, arm/v7 → ttyd filenames: x86_64, aarch64, armhf
+# Install ttyd
 ARG TARGETARCH
 RUN ARCH=$(echo ${TARGETARCH:-$(dpkg --print-architecture)} | sed 's|arm64|aarch64|;s|arm/v7|armhf|;s|armv7|armhf|;s|amd64|x86_64|') \
- && echo "Downloading ttyd for arch: ${ARCH}" \
- && curl -fsSL "https://github.com/tsl0922/ttyd/releases/download/1.7.7/ttyd.${ARCH}" -o /usr/local/bin/ttyd \
- && chmod +x /usr/local/bin/ttyd
+    && curl -fsSL "https://github.com/tsl0922/ttyd/releases/download/1.7.7/ttyd.${ARCH}" -o /usr/local/bin/ttyd \
+    && chmod +x /usr/local/bin/ttyd
 
-RUN node -v && npm -v
-
-# Install Homebrew (Linuxbrew) for OpenClaw skill dependencies
-# Homebrew is required for installing CLI tools like gemini, aider, etc.
+# Homebrew setup - SLOWEST PART: cache this layer aggressively
 ENV HOMEBREW_NO_AUTO_UPDATE=1 \
     HOMEBREW_NO_INSTALL_CLEANUP=1 \
-    HOMEBREW_NO_ANALYTICS=1
+    HOMEBREW_NO_ENV_HINTS=1 \
+    HOMEBREW_NO_ANALYTICS=1 \
+    PATH="/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:${PATH}"
 
 RUN useradd -m -s /bin/bash linuxbrew \
- && mkdir -p /home/linuxbrew/.linuxbrew \
- && chown -R linuxbrew:linuxbrew /home/linuxbrew
+    && usermod -aG sudo linuxbrew \
+    && mkdir -p /home/linuxbrew/.linuxbrew \
+    && chown -R linuxbrew: /home/linuxbrew/.linuxbrew
 
 USER linuxbrew
-RUN /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+RUN --mount=type=cache,target=/home/linuxbrew/.cache,uid=1000,gid=1000 \
+    /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" \
+    && brew install gcc
+
 USER root
 
-# Add Homebrew to PATH for all users
-ENV PATH="/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:${PATH}"
+# Install OpenClaw - pin version for cache stability
+RUN --mount=type=cache,target=/root/.npm \
+    npm config set fund false && npm config set audit false \
+    && npm install -g openclaw@2026.1.30
 
-# Verify brew is available and install gcc (needed for compiling some brew packages)
-# Must run as linuxbrew user - Homebrew refuses to run as root
-USER linuxbrew
-RUN brew --version && brew install gcc
-USER root
+# Copy application files
+COPY --chmod=755 entrypoint.sh /
+COPY --chmod=755 oc_config_helper.py /
+COPY nginx.conf.tpl landing.html.tpl /etc/nginx/
 
-# Install OpenClaw globally
-RUN npm config set fund false && npm config set audit false \
- && npm install -g openclaw@2026.1.30
+RUN mkdir -p /run/nginx
 
-COPY run.sh /run.sh
-COPY oc_config_helper.py /oc_config_helper.py
-COPY nginx.conf.tpl /etc/nginx/nginx.conf.tpl
-COPY landing.html.tpl /etc/nginx/landing.html.tpl
-RUN chmod +x /run.sh /oc_config_helper.py \
- && mkdir -p /run/nginx
-
-CMD [ "/run.sh" ]
+CMD ["/entrypoint.sh"]

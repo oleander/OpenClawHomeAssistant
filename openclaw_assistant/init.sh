@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Ensure Homebrew and brew-installed binaries are in PATH
+echo "[INFO] Initializing OpenClaw Assistant..."
+
 export PATH="/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:${PATH}"
 
 OPTIONS_FILE="/data/options.json"
@@ -11,32 +12,23 @@ if [ ! -f "$OPTIONS_FILE" ]; then
   exit 1
 fi
 
-# Read add-on options using jq
+# Read add-on options
 TZNAME=$(jq -r '.timezone // "Europe/Sofia"' "$OPTIONS_FILE")
 GW_PUBLIC_URL=$(jq -r '.gateway_public_url // empty' "$OPTIONS_FILE")
 HA_TOKEN=$(jq -r '.homeassistant_token // empty' "$OPTIONS_FILE")
-ENABLE_TERMINAL=$(jq -r '.enable_terminal // true' "$OPTIONS_FILE")
-
 ROUTER_HOST=$(jq -r '.router_ssh_host // empty' "$OPTIONS_FILE")
 ROUTER_USER=$(jq -r '.router_ssh_user // empty' "$OPTIONS_FILE")
 ROUTER_KEY=$(jq -r '.router_ssh_key_path // "/data/keys/router_ssh"' "$OPTIONS_FILE")
-
 CLEAN_LOCKS_ON_START=$(jq -r '.clean_session_locks_on_start // true' "$OPTIONS_FILE")
-CLEAN_LOCKS_ON_EXIT=$(jq -r '.clean_session_locks_on_exit // true' "$OPTIONS_FILE")
-
 GATEWAY_BIND_MODE=$(jq -r '.gateway_bind_mode // "loopback"' "$OPTIONS_FILE")
 GATEWAY_PORT=$(jq -r '.gateway_port // 18789' "$OPTIONS_FILE")
 ALLOW_INSECURE_AUTH=$(jq -r '.allow_insecure_auth // false' "$OPTIONS_FILE")
 
 export TZ="$TZNAME"
-
-# Reduce risk of secrets ending up in logs
-set +x
-
 export HOME=/config
+
 mkdir -p /config/.openclaw /config/clawd /config/keys /config/secrets
 
-# Back-compat
 if [ ! -e /data ]; then
   ln -s /config /data || true
 fi
@@ -47,11 +39,11 @@ mkdir -p /config/.openclaw/agents/main/sessions || true
 STARTUP_LOCK="/config/.openclaw/gateway.start.lock"
 exec 9>"$STARTUP_LOCK"
 if ! flock -n 9; then
-  echo "[ERROR] Another instance appears to be running (could not acquire $STARTUP_LOCK)."
+  echo "[ERROR] Another instance appears to be running."
   exit 1
 fi
 
-# Session lock cleanup helpers
+# Session lock cleanup
 gateway_running() {
   pgrep -f "openclaw.*gateway.*run" >/dev/null 2>&1
 }
@@ -67,11 +59,11 @@ cleanup_session_locks() {
   fi
 
   if gateway_running; then
-    echo "[INFO] Gateway appears to be running; leaving session lock files untouched."
+    echo "[INFO] Gateway running; leaving session locks untouched."
     return 0
   fi
 
-  echo "[INFO] Removing stale session lock files (${#locks[@]}) from ${sessions_dir}"
+  echo "[INFO] Removing stale session locks (${#locks[@]})"
   rm -f "${sessions_dir}"/*.jsonl.lock || true
 }
 
@@ -85,54 +77,15 @@ if [ -n "$HA_TOKEN" ]; then
   printf '%s' "$HA_TOKEN" > /config/secrets/homeassistant.token
 fi
 
-# Create connection notes
 cat > /config/CONNECTION_NOTES.txt <<EOF
-Home Assistant token (if set): /config/secrets/homeassistant.token
-Router SSH (generic):
-  host=${ROUTER_HOST}
-  user=${ROUTER_USER}
-  key=${ROUTER_KEY}
+Home Assistant token: /config/secrets/homeassistant.token
+Router SSH: host=${ROUTER_HOST}, user=${ROUTER_USER}, key=${ROUTER_KEY}
 EOF
 
-# Graceful shutdown handling
-GW_PID=""
-NGINX_PID=""
-TTYD_PID=""
-
-shutdown() {
-  echo "[INFO] Shutdown requested; stopping services..."
-
-  if [ -n "${NGINX_PID}" ] && kill -0 "${NGINX_PID}" >/dev/null 2>&1; then
-    kill -TERM "${NGINX_PID}" >/dev/null 2>&1 || true
-    wait "${NGINX_PID}" || true
-  fi
-
-  if [ -n "${TTYD_PID}" ] && kill -0 "${TTYD_PID}" >/dev/null 2>&1; then
-    kill -TERM "${TTYD_PID}" >/dev/null 2>&1 || true
-    wait "${TTYD_PID}" || true
-  fi
-
-  if [ -n "${GW_PID}" ] && kill -0 "${GW_PID}" >/dev/null 2>&1; then
-    kill -TERM "${GW_PID}" >/dev/null 2>&1 || true
-    wait "${GW_PID}" || true
-  fi
-
-  if [ "$CLEAN_LOCKS_ON_EXIT" = "true" ]; then
-    cleanup_session_locks || true
-  fi
-}
-
-trap shutdown INT TERM
-
-if ! command -v openclaw >/dev/null 2>&1; then
-  echo "[ERROR] openclaw is not installed."
-  exit 1
-fi
-
-# Bootstrap minimal OpenClaw config if missing
+# Bootstrap OpenClaw config if missing
 OPENCLAW_CONFIG_PATH="/config/.openclaw/openclaw.json"
 if [ ! -f "$OPENCLAW_CONFIG_PATH" ]; then
-  echo "[INFO] OpenClaw config missing; bootstrapping minimal config at $OPENCLAW_CONFIG_PATH"
+  echo "[INFO] Bootstrapping OpenClaw config"
   python3 - <<'PY'
 import json
 import secrets
@@ -154,32 +107,13 @@ cfg = {
 }
 
 cfg_path.write_text(json.dumps(cfg, indent=2) + "\n", encoding='utf-8')
-print("[INFO] Wrote minimal OpenClaw config (gateway.mode=local, auth.token generated)")
 PY
 fi
 
 # Apply gateway settings
 export OPENCLAW_CONFIG_PATH="/config/.openclaw/openclaw.json"
-HELPER_PATH="/oc_config_helper.py"
-
-if [ -f "$OPENCLAW_CONFIG_PATH" ] && [ -f "$HELPER_PATH" ]; then
-  if ! python3 "$HELPER_PATH" apply-gateway-settings "$GATEWAY_BIND_MODE" "$GATEWAY_PORT" "$ALLOW_INSECURE_AUTH"; then
-    echo "[ERROR] Failed to apply gateway settings"
-    exit 1
-  fi
-fi
-
-echo "[INFO] Starting OpenClaw Assistant gateway (openclaw)..."
-openclaw gateway run &
-GW_PID=$!
-
-# Start web terminal (optional)
-if [ "$ENABLE_TERMINAL" = "true" ]; then
-  echo "[INFO] Starting web terminal (ttyd) on 127.0.0.1:7681"
-  ttyd -W -i 127.0.0.1 -p 7681 -b /terminal bash &
-  TTYD_PID=$!
-else
-  echo "[INFO] Terminal disabled (enable_terminal=false)"
+if [ -f "$OPENCLAW_CONFIG_PATH" ] && [ -f "/oc_config_helper.py" ]; then
+  python3 /oc_config_helper.py apply-gateway-settings "$GATEWAY_BIND_MODE" "$GATEWAY_PORT" "$ALLOW_INSECURE_AUTH" || exit 1
 fi
 
 # Render nginx config
@@ -194,8 +128,7 @@ public_url = os.environ.get('GW_PUBLIC_URL','')
 token = os.environ.get('GW_TOKEN','')
 gw_path = '' if public_url.endswith('/') else '/'
 
-conf = tpl
-Path('/etc/nginx/nginx.conf').write_text(conf)
+Path('/etc/nginx/nginx.conf').write_text(tpl)
 
 landing = landing_tpl.replace('__GATEWAY_TOKEN__', token)
 landing = landing.replace('__GATEWAY_PUBLIC_URL__', public_url)
@@ -213,9 +146,7 @@ except Exception:
     pass
 PY
 
-echo "[INFO] Starting ingress proxy (nginx) on :8099"
-nginx -g 'daemon off;' &
-NGINX_PID=$!
+echo "[INFO] Initialization complete"
 
-# Wait for gateway; if it exits, shut down others
-wait "${GW_PID}"
+# Start the supervised services
+supervisorctl start openclaw ttyd nginx
