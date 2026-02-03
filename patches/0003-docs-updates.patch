@@ -1,0 +1,543 @@
+diff --git a/DOCS.md b/DOCS.md
+index 61685d5..96c8c49 100644
+--- a/DOCS.md
++++ b/DOCS.md
+@@ -3,6 +3,7 @@
+ This add-on runs **OpenClaw** inside **Home Assistant OS (HAOS)**.
+ 
+ It’s designed to be friendly to non-technical users:
++
+ - The add-on provides a simple Home Assistant page (Ingress) with a terminal.
+ - You complete setup using OpenClaw’s built-in onboarding commands.
+ 
+@@ -20,18 +21,21 @@ The Gateway UI is opened in a **separate tab** (not embedded), because Home Assi
+ 
+ ## 1) Install the add-on
+ 
+-1) Home Assistant → **Settings → Add-ons → Add-on store**
+-2) Add repository URL:
++1. Home Assistant → **Settings → Add-ons → Add-on store**
++2. Add repository URL:
++
+ - Add-on store → ⋮ → **Repositories** → paste:
+   - `https://github.com/techartdev/OpenClawHomeAssistant`
+-3) Install **OpenClaw Assistant**
+-4) Start the add-on
++
++3. Install **OpenClaw Assistant**
++4. Start the add-on
+ 
+ ---
+ 
+ ## 2) First-time setup (step-by-step)
+ 
+ Open the add-on page (Ingress). You will see:
++
+ - **Open Gateway Web UI** button
+ - **Terminal** embedded on the page
+ 
+@@ -43,6 +47,7 @@ In the terminal, run:
+   - `openclaw onboard`
+ 
+ If you prefer:
++
+ - `openclaw configure`
+ 
+ Follow the prompts.
+@@ -62,10 +67,12 @@ Copy the token somewhere safe.
+ You have two common setups:
+ 
+ #### Option 1: Use Home Assistant HTTPS (recommended)
++
+ If your Home Assistant is already exposed via HTTPS (Nabu Casa, reverse proxy, etc.), use that.
+ This avoids browser security issues.
+ 
+ #### Option 2: LAN access (http://192.168.x.x) — using add-on options (recommended)
++
+ The easiest way to enable LAN access is via the add-on configuration:
+ 
+ 1. Go to Home Assistant → **Settings → Add-ons → OpenClaw Assistant → Configuration**
+@@ -78,6 +85,7 @@ The easiest way to enable LAN access is via the add-on configuration:
+ The add-on will automatically update OpenClaw's configuration on startup.
+ 
+ #### Option 3: LAN access — manual configuration (advanced)
++
+ If you prefer to configure manually via terminal:
+ 
+ ```sh
+@@ -93,11 +101,13 @@ Then restart the add-on.
+ ## 3) Configure the “Open Gateway Web UI” button
+ 
+ The button uses the add-on option:
++
+ - `gateway_public_url`
+ 
+ Set it in Home Assistant → Add-on configuration.
+ 
+ Examples:
++
+ - LAN:
+   - `http://192.168.1.119:18789`
+ - Public HTTPS:
+@@ -125,19 +135,23 @@ If you open the Gateway UI over LAN HTTP and see:
+ You have 3 options:
+ 
+ ### Option A — Use HTTPS (best)
++
+ Put the gateway behind HTTPS (recommended long-term).
+ 
+ ### Option B — Use localhost via port-forward
++
+ Access it as `http://localhost:18789` using SSH port forwarding from your computer.
+ 
+ ### Option C — Allow insecure auth (quick workaround; less secure)
+ 
+ **Via add-on configuration (recommended)**:
++
+ 1. Go to Home Assistant → **Settings → Add-ons → OpenClaw Assistant → Configuration**
+ 2. Set `allow_insecure_auth`: **true**
+ 3. Restart the add-on
+ 
+ **Via terminal (manual)**:
++
+ ```sh
+ openclaw config set gateway.controlUi.allowInsecureAuth true
+ ```
+@@ -153,6 +167,7 @@ This allows using the Control UI over LAN HTTP.
+ This add-on keeps options minimal but practical. See `openclaw_assistant_dev/config.yaml` for the full schema.
+ 
+ ### Gateway Network Settings
++
+ Control how the OpenClaw gateway binds to the network:
+ 
+ - **`gateway_bind_mode`** (string: **loopback** or **lan**, default **loopback**)
+@@ -170,27 +185,34 @@ Control how the OpenClaw gateway binds to the network:
+ These settings are applied automatically on add-on startup. No need to run `openclaw config` commands manually.
+ 
+ ### Terminal
++
+ - `enable_terminal` (bool, default **true**)
+ 
+ Security note: the terminal gives shell access inside the add-on container.
+ 
+ ### Home Assistant token
++
+ - `homeassistant_token` (optional)
+ 
+ If set, it is written to:
++
+ - `/config/secrets/homeassistant.token`
+ 
+ ### Router SSH (generic)
++
+ For custom automations that need SSH access to a router/firewall or other LAN device:
++
+ - `router_ssh_host`
+ - `router_ssh_user`
+ - `router_ssh_key_path` (default `/data/keys/router_ssh`)
+ 
+ How to provide the key:
++
+ - Put the private key file under the add-on config directory so it appears in-container at `/data/keys/...`
+ - Recommended permissions: `chmod 600`
+ 
+ ### Session cleanup
++
+ - `clean_session_locks_on_start` (bool, default **true**) — Remove stale lock files on startup
+ - `clean_session_locks_on_exit` (bool, default **true**) — Remove stale lock files on shutdown
+ 
+@@ -199,15 +221,18 @@ How to provide the key:
+ ## Troubleshooting
+ 
+ ### I get ERR_CONNECTION_REFUSED
++
+ - The gateway is not reachable at that IP/port.
+ - Confirm bind/port in terminal:
+   - `openclaw config get gateway.bind`
+   - `openclaw config get gateway.port`
+ 
+ ### The Gateway UI opens but shows Unauthorized
++
+ - Fetch the token:
+   - `openclaw config get gateway.auth.token`
+ 
+ ### Terminal isn’t visible
++
+ - Ensure `enable_terminal=true`
+ - Check logs for `Starting web terminal (ttyd)`
+diff --git a/README.md b/README.md
+index 76c8ab6..90f34c9 100644
+--- a/README.md
++++ b/README.md
+@@ -60,4 +60,5 @@ See **DOCS.md** for a step-by-step first-time setup guide + troubleshooting.
+ ## Support / Donations
+ 
+ If you find this useful and you want to bring me a coffee to make more useful things, or support the project, use the link below:
++
+ - https://revolut.me/vanyo6dhw
+diff --git a/openclaw_assistant/task.md b/openclaw_assistant/task.md
+new file mode 100644
+index 0000000..956b3c9
+--- /dev/null
++++ b/openclaw_assistant/task.md
+@@ -0,0 +1,360 @@
++Agents
++These agent definitions will be passed to an expert who will convert each into a working autonomous agent with the described responsibilities, inputs, outputs, and behaviors.
++
++Analyzer
++Scans a large diff to identify distinct logical themes and maps each theme to its relevant files, producing a structured breakdown for downstream agents.
++∙ Parse the full diff and list all modified files with change statistics
++∙ Identify logical groupings: bugfix, feature, refactor, dependency update, config change
++∙ Assign each file to one or more candidate themes
++∙ Flag files that span multiple themes as potential split points
++∙ Estimate complexity per theme (small/medium/large based on lines and files)
++∙ Output a structured list of themes with names, purposes, and file mappings
++∙ Note any obvious dependencies between identified themes
++∙ Surface ambiguous changes that need human clarification
++
++Extractor
++Isolates changes for a single theme from the larger diff, producing a standalone patch that contains only the relevant hunks and files.
++∙ Accept a theme definition from Analyzer with its file list
++∙ Extract only the hunks relevant to that specific theme
++∙ Handle files that contain changes for multiple themes by splitting hunks
++∙ Preserve original commit attribution where possible
++∙ Generate a clean git-format-patch output
++∙ Document any hunks that couldn’t be cleanly separated
++∙ Flag missing dependencies that exist in other themes
++∙ Output a patch file and a list of unresolved cross-theme references
++
++Fixer
++Takes an extracted patch and ensures it compiles, passes linting, and runs tests independently without relying on other split patches.
++∙ Apply the patch to a clean branch from upstream base
++∙ Run the build process and capture any failures
++∙ Add minimal import statements or type definitions if missing
++∙ Stub or mock dependencies that live in other split PRs
++∙ Run the linter and auto-fix what’s possible
++∙ Execute the test suite relevant to changed files
++∙ Never expand functionality beyond what the patch originally did
++∙ Output a working patch with a pass/fail report
++
++Scoper
++Evaluates an extracted patch to determine if it’s appropriately sized and focused, rejecting patches that are too large or do more than one thing.
++∙ Receive a patch from Extractor or Fixer
++∙ Count lines changed, files touched, and logical concerns addressed
++∙ Reject if more than one distinct behavior is being modified
++∙ Reject if size exceeds reasonable single-PR thresholds
++∙ Provide specific feedback on what should be split further
++∙ Approve patches that pass focus and size checks
++∙ Return rejected patches to Extractor with splitting guidance
++∙ Track rejection history to prevent infinite loops
++
++Writer
++Crafts the PR title, description, commit messages, and metadata for a single themed patch following upstream conventions.
++∙ Accept a working patch and its theme metadata
++∙ Write a title under 50 characters in imperative mood
++∙ Compose a description covering what, why, and how
++∙ Structure commit messages to tell a coherent story
++∙ Reference the original source PR or issue
++∙ Suggest appropriate labels and reviewers
++∙ Follow the target repository’s contribution guidelines
++∙ Output a complete draft ready for submission
++
++Verifier
++Checks that the code in a patch actually implements what the theme claims it does, catching mismatches between intent and implementation.
++∙ Read the theme definition and its stated purpose
++∙ Analyze the actual code changes in the patch
++∙ Confirm the code achieves the described goal
++∙ Detect dead code or incomplete implementations
++∙ Flag logic that contradicts the stated intent
++∙ Verify edge cases mentioned in the theme are handled
++∙ Pass patches that do what they claim
++∙ Reject with specifics when implementation doesn’t match intent
++
++Aligner
++Ensures the PR description accurately reflects what the code actually does, catching drift between documentation and implementation.
++∙ Compare the Writer’s PR description against actual patch contents
++∙ Flag claims in the description not supported by code
++∙ Flag code changes not mentioned in the description
++∙ Check that the title accurately summarizes the change
++∙ Verify commit messages align with their actual diffs
++∙ Suggest description edits to close any gaps
++∙ Approve when documentation and code match
++∙ Reject with specific mismatches to fix
++
++Observer
++Compares the complete set of split PRs against the original diff to ensure nothing was lost, added, or fundamentally changed in approach.
++∙ Hold the original diff as ground truth
++∙ Collect all finalized split patches
++∙ Verify combined coverage equals the original
++∙ Detect any logic that was added during splitting
++∙ Detect any logic that was lost during splitting
++∙ Flag changes in approach or implementation strategy
++∙ Confirm the splits are a pure decomposition
++∙ Approve the set or reject with drift specifics
++
++Sequencer
++Analyzes dependencies between split PRs and determines the optimal order for submission to maximize merge likelihood.
++∙ Receive all approved split PRs
++∙ Build a dependency graph based on code references
++∙ Identify PRs that can be submitted in parallel
++∙ Order dependent PRs for sequential submission
++∙ Place refactors before features that use them
++∙ Place dependency updates before code that requires them
++∙ Output an ordered list or DAG for submission
++∙ Note any circular dependencies that need resolution
++
++Skills
++These skill definitions will be passed to an expert who will implement each as a reusable capability that agents can invoke to perform specific technical tasks.
++
++Diff Reading
++Parse and interpret git diffs to understand what changed at the file and hunk level.
++∙ Parse unified diff format into structured data
++∙ Extract file paths, line numbers, and change types
++∙ Separate additions, deletions, and context lines
++∙ Handle binary file indicators
++∙ Parse diff stats for quick size assessment
++∙ Support both single-file and multi-file diffs
++∙ Recognize rename and move operations
++∙ Output structured hunk objects for further processing
++
++Code Semantics
++Understand what code actually does beyond surface-level text changes, grasping behavior and intent.
++∙ Identify function and method boundaries
++∙ Track variable usage and data flow
++∙ Recognize common patterns: guard clauses, factory methods, etc.
++∙ Understand type relationships and inheritance
++∙ Detect side effects and state mutations
++∙ Distinguish structural changes from behavioral changes
++∙ Map imports and external dependencies
++∙ Summarize the purpose of a code block in plain language
++
++Theme Detection
++Group related changes by their logical purpose, distinguishing bugfixes from features from refactors.
++∙ Recognize bugfix patterns: null checks, boundary fixes, error handling
++∙ Recognize feature patterns: new methods, new files, new tests
++∙ Recognize refactor patterns: renames, extractions, reorganization
++∙ Recognize dependency changes: Gemfile, package.json, lock files
++∙ Recognize config changes: environment, CI, linter rules
++∙ Cluster related changes even across distant files
++∙ Assign confidence scores to theme classifications
++∙ Handle ambiguous changes that could fit multiple themes
++
++Git Operations
++Execute git commands to manipulate branches, patches, and history for extraction and validation.
++∙ Create branches from specific refs
++∙ Apply patches with git apply or git am
++∙ Generate patches with git format-patch
++∙ Cherry-pick specific commits
++∙ Handle merge conflicts programmatically
++∙ Reset and clean working directories
++∙ Track patch application success and failure
++∙ Manage multiple worktrees for parallel validation
++
++Dependency Mapping
++Track what code depends on what other code to understand required ordering and isolation challenges.
++∙ Parse import and require statements
++∙ Build a graph of file dependencies
++∙ Identify shared dependencies between themes
++∙ Detect circular dependencies
++∙ Find the minimal set of files needed for a change
++∙ Track runtime vs build-time dependencies
++∙ Map test files to their implementation files
++∙ Output dependency information for Sequencer
++
++Test Execution
++Run test suites and interpret results to validate that patches work correctly in isolation.
++∙ Detect the project’s test framework
++∙ Run full suite or targeted tests by file
++∙ Parse test output for pass/fail/skip counts
++∙ Extract failure messages and stack traces
++∙ Measure test coverage on changed lines
++∙ Handle test timeouts gracefully
++∙ Report flaky test detection
++∙ Output structured test results
++
++Build Validation
++Compile, lint, and type-check code to ensure patches don’t break the build.
++∙ Detect the project’s build system
++∙ Run compilation and capture errors
++∙ Run linter with project configuration
++∙ Run type-checker if applicable
++∙ Parse error output into structured issues
++∙ Distinguish errors from warnings
++∙ Auto-fix linter issues where safe
++∙ Output build status with specific failures
++
++Size Estimation
++Judge whether a change is appropriately scoped for a single PR based on lines, files, and complexity.
++∙ Count lines added, removed, and modified
++∙ Count files touched
++∙ Weight changes by complexity, not just line count
++∙ Compare against configurable thresholds
++∙ Consider test code separately from implementation
++∙ Account for generated or boilerplate code
++∙ Output a size classification: too small, right, too big
++∙ Provide reasoning for the classification
++
++Scope Comparison
++Compare two diffs or approaches to detect drift, additions, or omissions between them.
++∙ Normalize diffs for comparison
++∙ Identify lines present in one but not the other
++∙ Detect semantic equivalence despite textual differences
++∙ Flag behavioral changes vs cosmetic changes
++∙ Measure coverage overlap percentage
++∙ Highlight specific drift locations
++∙ Distinguish intentional refinement from accidental drift
++∙ Output a detailed comparison report
++
++PR Composition
++Write PR titles, descriptions, and commit messages following conventions and best practices.
++∙ Generate titles in imperative mood under 50 characters
++∙ Structure descriptions with what, why, and how sections
++∙ Write commit messages that explain the change
++∙ Include references to related issues or PRs
++∙ Format code blocks and lists in markdown
++∙ Adapt tone to match repository norms
++∙ Suggest labels based on change type
++∙ Output complete PR metadata ready for submission
++
++Repo Awareness
++Read and understand repository conventions, ownership, and contribution requirements.
++∙ Parse CODEOWNERS for reviewer suggestions
++∙ Read CONTRIBUTING.md for submission guidelines
++∙ Detect code style from existing files or configs
++∙ Identify protected branches and merge requirements
++∙ Find related past PRs for context
++∙ Understand CI requirements from workflow files
++∙ Map teams to code areas
++∙ Output relevant context for other agents
++
++Rules
++These rule definitions will be passed to an expert who will encode each as a constraint or validation check that agents must respect during execution.
++
++One Theme Per PR
++A pull request must address exactly one logical concern, never bundling unrelated changes together.
++∙ Define “theme” as a single bugfix, feature, refactor, or dependency change
++∙ Reject PRs that fix a bug AND add a feature
++∙ Reject PRs that refactor AND change behavior
++∙ Allow necessary test additions alongside implementation
++∙ Allow minimal documentation updates for the change
++∙ Scoper agent enforces this rule
++∙ Provide clear feedback on what themes were detected
++∙ Suggest how to split when violated
++
++Preserve Intent
++The collection of split PRs must be functionally equivalent to the original diff, with nothing added or lost.
++∙ Combined patches should produce identical end state
++∙ No behavioral changes introduced during splitting
++∙ No behavioral changes removed during splitting
++∙ Glue code from Fixer doesn’t count as added behavior
++∙ Observer agent enforces this rule
++∙ Compare at the semantic level, not just text
++∙ Flag any deviation for human review
++∙ Track equivalence across the full split set
++
++Smallest Viable Change
++Extract the minimum code necessary to achieve the theme’s purpose, nothing more.
++∙ Include only files directly relevant to the theme
++∙ Include only hunks that implement the theme
++∙ Exclude opportunistic cleanups unrelated to theme
++∙ Exclude “while I’m here” fixes
++∙ Extractor agent follows this rule
++∙ Scoper agent validates it
++∙ Prefer too small over too large
++∙ Err toward splitting further when uncertain
++
++Independence First
++Each split PR should ideally be mergeable without requiring the other split PRs to land first.
++∙ Avoid creating chains of dependent PRs when possible
++∙ Use stubs or mocks to break dependencies
++∙ Accept some duplication to achieve independence
++∙ Flag unavoidable dependencies for Sequencer
++∙ Independent PRs can be reviewed in parallel
++∙ Independent PRs survive if siblings are rejected
++∙ Extractor and Fixer work toward this goal
++∙ Sequencer handles cases where it’s not achievable
++
++Refactors Before Features
++Structural improvements must be submitted before new functionality that builds on them.
++∙ Identify refactors: renames, extractions, reorganization
++∙ Identify features: new behavior, new capabilities
++∙ Sequencer places refactors earlier in the order
++∙ Features reference refactor PRs as dependencies
++∙ This maximizes refactor merge likelihood
++∙ Reviewers prefer reviewing clean structure first
++∙ Reduces cognitive load on feature review
++∙ Prevents feature rejection from blocking refactor
++
++Deps First
++Dependency updates must be submitted before code that relies on the updated dependencies.
++∙ Identify dependency changes: Gemfile, package.json, etc.
++∙ Identify code using newly available APIs
++∙ Sequencer places dep updates at the front
++∙ Minimal dep-only PRs are easy to review
++∙ Reduces risk of breaking main with partial changes
++∙ Allows CI to validate dep compatibility first
++∙ Code PRs can assume deps are already merged
++∙ Clear separation of concerns for reviewers
++
++No Scope Creep
++The Fixer agent may only add glue code to make patches work, never expanding what the PR does.
++∙ Glue code: imports, type stubs, minimal mocks
++∙ Not glue code: new functions, new tests, new features
++∙ Fixer cannot fix bugs it notices along the way
++∙ Fixer cannot improve code quality beyond the theme
++∙ Document any tempting improvements for future PRs
++∙ Scoper validates Fixer didn’t expand scope
++∙ Observer catches scope creep in final comparison
++∙ Human review required if glue code seems substantial
++
++Description Matches Code
++The PR description must accurately reflect what the code changes actually do, no more and no less.
++∙ Every claim in description must be supported by code
++∙ Every significant code change must be mentioned
++∙ Title must summarize the actual change
++∙ Aligner agent enforces this rule
++∙ Reject descriptions that oversell
++∙ Reject descriptions that undersell
++∙ Commit messages must match their diffs
++∙ Update descriptions when code changes during review
++
++Respect Upstream Style
++Follow the target repository’s conventions for code style, commit format, and PR structure.
++∙ Read and apply existing linter configuration
++∙ Match naming conventions from surrounding code
++∙ Follow commit message format from repo history
++∙ Use PR template if one exists
++∙ Repo Awareness skill provides this context
++∙ Writer agent applies it to PR composition
++∙ Fixer agent applies it to code changes
++∙ Don’t impose personal preferences on upstream
++
++Flag Uncertainty
++When any agent is unsure about a decision, surface it for human review rather than guessing.
++∙ Define confidence thresholds for each decision type
++∙ Low confidence on theme assignment: flag it
++∙ Low confidence on hunk splitting: flag it
++∙ Low confidence on scope judgment: flag it
++∙ Collect flags into a human review queue
++∙ Provide context for why uncertainty exists
++∙ Continue processing other parts if possible
++∙ Never ship a PR with unresolved flags
++
++Atomic Commits
++Each commit within a PR should represent a single logical step that makes sense on its own.
++∙ One commit per logical change within the theme
++∙ Commits should compile individually if possible
++∙ Commit messages explain that step’s purpose
++∙ Don’t squash everything into one commit
++∙ Don’t have dozens of tiny fixup commits
++∙ Writer agent structures commits appropriately
++∙ Rebase and reorganize if needed
++∙ History should tell a readable story
++
++Traceable Lineage
++Every split PR must reference its origin so reviewers understand the context and can find related PRs.
++∙ Include link to original source PR or branch
++∙ Include link to sibling split PRs
++∙ Note which theme number this is (e.g., 3 of 7)
++∙ Explain the splitting rationale briefly
++∙ Writer agent adds these references
++∙ Helps reviewers see the big picture
++∙ Enables tracking split PR outcomes
++∙ Supports post-merge archaeology​​​​​​​​​​​​​​​​
